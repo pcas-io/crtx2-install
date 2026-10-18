@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          useradd -m -u 1000 tester
+          useradd -m -u 1500 tester  # 1000 ist in ubuntu:24.04 schon vergeben (Benutzer ubuntu)
           out=$(SUDO_USER=tester bash install.sh --check 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "Vorprüfung"
