@@ -20,7 +20,7 @@ normaler Benutzer mit sudo, Internet. Dieser Benutzer wird der Benutzer des Agen
 6. Übergabe: Adresse der Console und Einmal-Token – Anbieter (Claude, Mistral oder beide) wählst du danach im Browser
 
 Nur prüfen: `curl … | sudo bash -s -- --check`
-Unbeaufsichtigt: `curl … | sudo CRTX2_REPO=<owner/name> CRTX2_NAME=<name> bash`
+Unbeaufsichtigt: `curl … | sudo CRTX2_NAME=<name> bash` (Repo ist `pcas-io/crtx2`, ein anderes: `CRTX2_REPO=<owner/name>`)
 
 Das Skript enthält keine Zugangsdaten. Das Repo und den Namen fragt es ab.
 Protokoll: `/var/log/crtx2-install.log` (der Einmal-Token steht nicht darin).

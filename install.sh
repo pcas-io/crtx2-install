@@ -14,7 +14,7 @@
 #   2 Name des Nodes (= Hostname)    5 Bootstrap aus dem Repo
 #   3 Grundpakete                    6 Uebergabe: Claim-Adresse und Einmal-Token
 #
-# Unbeaufsichtigt (kein Terminal): CRTX2_REPO=<owner/name> CRTX2_NAME=<name>
+# Unbeaufsichtigt (kein Terminal): CRTX2_NAME=<name>, anderes Repo: CRTX2_REPO=<owner/name>
 # Nur pruefen: ... | sudo bash -s -- --check
 set -euo pipefail
 
@@ -102,7 +102,7 @@ done
 # ── 2 Name ──────────────────────────────────────────────────────────────────
 schritt "2 · Name des Nodes"
 jetzt=$(hostname -s)
-NAME=${CRTX2_NAME:-$(frage "So heißt der Node überall (Console, claude.ai/code, <name>.local)" "$jetzt")}
+NAME=${CRTX2_NAME:-$(frage "So heißt der Node überall (Console, Discord, claude.ai/code, <name>.local)" "$jetzt")}
 NAME=$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')
 printf '%s' "$NAME" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$' \
   || stopp "Name '$NAME': nur a-z, 0-9 und -, nicht am Anfang oder Ende."
@@ -126,9 +126,11 @@ ok "git, ssh, avahi ($NAME.local) installiert"
 
 # ── 4 Zugang zum Repo ───────────────────────────────────────────────────────
 schritt "4 · Zugang zum Repo"
-REPO=${CRTX2_REPO:-}
-[ -n "$REPO" ] || REPO=$(frage "Welches Repo? (owner/name auf GitHub)" "")
+# Keine Frage mehr (Lauf 6, Befund 40): das Repo ist fast immer dasselbe.
+# Ein anderes setzt CRTX2_REPO=<owner/name> vor bash.
+REPO=${CRTX2_REPO:-pcas-io/crtx2}
 printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || stopp "Repo '$REPO': bitte als owner/name."
+ok "Repo: $REPO (ein anderes: CRTX2_REPO=<owner/name> vor bash)"
 if timeout 20 git ls-remote "https://github.com/$REPO.git" HEAD >/dev/null 2>&1; then
   URL="https://github.com/$REPO.git"; SSH_URL=""
   ok "öffentliches Repo – kein Schlüssel nötig"
