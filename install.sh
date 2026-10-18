@@ -18,6 +18,14 @@
 # Nur pruefen: ... | sudo bash -s -- --check
 set -euo pipefail
 
+# Alles steckt in main(), das erst in der letzten Zeile aufgerufen wird, und
+# zwar mit stdin aus /dev/null. Zwei Gruende (curl | bash):
+#  1. Bricht der Download mitten im Skript ab, laeuft nichts Halbes los.
+#  2. Unterprozesse (git, ssh, apt) erben sonst die Pipe als stdin; git clone
+#     hing daran am 2026-10-18 auf zer0 unbegrenzt (derselbe Klon mit
+#     </dev/null: 2,5 s). Fragen liest frage() ausdruecklich von /dev/tty.
+main() {
+
 LOG=/var/log/crtx2-install.log
 KEY=/etc/crtx2/deploy-key
 SRC=/opt/crtx2-src
@@ -135,9 +143,12 @@ else
   if ! git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1; then
     printf '\n  Das Repo ist privat. Trag diesen Schlüssel als %sDeploy Key%s ein (nur lesen, %skein%s Haken bei „Allow write access“):\n\n' "$B" "$N" "$B" "$N"
     printf '    https://github.com/%s/settings/keys/new\n\n    %s\n\n' "$REPO" "$(cat "$KEY.pub")"
-    printf '  Ich warte, bis der Zugang klappt (höchstens 15 min) …\n'
-    for _ in $(seq 180); do
-      git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1 && break
+    printf '  Ich prüfe alle 5 s von selbst – du musst nichts bestätigen (höchstens 15 min).\n  '
+    for i in $(seq 180); do
+      if fehler_git=$(timeout 20 git ls-remote "$SSH_URL" HEAD 2>&1 >/dev/null); then printf '\n'; break; fi
+      printf '.'
+      # Jede Minute die letzte Meldung von GitHub, damit niemand im Dunkeln wartet.
+      [ $((i % 12)) = 0 ] && printf '\n  noch kein Zugang: %s\n  ' "$(printf '%s' "$fehler_git" | tail -1)"
       sleep 5
     done
   fi
@@ -145,11 +156,18 @@ else
   URL="$SSH_URL"
   ok "Zugang zum Repo per Deploy-Key"
 fi
+# Ein halber Klon (abgebrochener Lauf) hat kein HEAD: dann neu holen statt flicken.
+if [ -d "$SRC/.git" ] && ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+  rm -rf "$SRC"
+  warn "halber Klon vom letzten Lauf entfernt"
+fi
 if [ -d "$SRC/.git" ]; then
-  git -C "$SRC" fetch -q origin && git -C "$SRC" checkout -q --detach origin/HEAD
+  timeout 300 git -C "$SRC" fetch -q origin && git -C "$SRC" checkout -q --detach origin/HEAD \
+    || stopp "Quelle nicht aktualisierbar (git fetch) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
   ok "Quelle aktualisiert: $SRC"
 else
-  git clone -q --depth 1 "$URL" "$SRC"
+  timeout 300 git clone -q --depth 1 "$URL" "$SRC" \
+    || stopp "Quelle nicht geholt (git clone, 5 min) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
   ok "Quelle geholt: $SRC"
 fi
 
@@ -178,3 +196,6 @@ fi
 printf '  Danach führt dich die Console durch die Anmeldung bei Claude – ohne SSH.\n'
 printf '  Dein Agent erscheint anschließend als „%s claude“ in claude.ai/code.\n' "$NAME"
 printf '\n%sFertig.%s Protokoll: %s\n' "$G" "$N" "$LOG"
+}
+
+main "$@" </dev/null
