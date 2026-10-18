@@ -143,16 +143,20 @@ else
   if ! git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1; then
     printf '\n  Das Repo ist privat. Trag diesen Schlüssel als %sDeploy Key%s ein (nur lesen, %skein%s Haken bei „Allow write access“):\n\n' "$B" "$N" "$B" "$N"
     printf '    https://github.com/%s/settings/keys/new\n\n    %s\n\n' "$REPO" "$(cat "$KEY.pub")"
-    printf '  Ich prüfe alle 5 s von selbst – du musst nichts bestätigen (höchstens 15 min).\n  '
-    for i in $(seq 180); do
-      if fehler_git=$(timeout 20 git ls-remote "$SSH_URL" HEAD 2>&1 >/dev/null); then printf '\n'; break; fi
+    printf '  Ich prüfe von selbst – du musst nichts bestätigen. Enter prüft sofort.\n  '
+    # Abstand waechst von 5 auf 30 s: viele abgewiesene SSH-Anmeldungen in
+    # kurzer Folge bremst GitHub vermutlich aus (Lauf 4/5: danach hing jeder
+    # Klon bis zur Zeitgrenze, mit Abstand dauerte er 2 s).
+    warte=5; bis=$((SECONDS + 900)); zugang=0
+    while [ "$SECONDS" -lt "$bis" ]; do
+      if timeout 20 git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1; then zugang=1; printf '\n'; break; fi
       printf '.'
-      # Jede Minute die letzte Meldung von GitHub, damit niemand im Dunkeln wartet.
-      [ $((i % 12)) = 0 ] && printf '\n  noch kein Zugang: %s\n  ' "$(printf '%s' "$fehler_git" | tail -1)"
-      sleep 5
+      if [ -n "$TTY" ]; then read -r -t "$warte" _ < "$TTY" || true; else sleep "$warte"; fi
+      [ "$warte" -lt 30 ] && warte=$((warte + 5))
     done
+    [ "$zugang" = 1 ] || stopp "kein Zugang zum Repo – Schlüssel eingetragen? Dann denselben Befehl noch einmal."
+    sleep 10  # Abstand zur letzten Abweisung, bevor der Klon startet
   fi
-  git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1 || stopp "kein Zugang zum Repo – Schlüssel eingetragen? Dann denselben Befehl noch einmal."
   URL="$SSH_URL"
   ok "Zugang zum Repo per Deploy-Key"
 fi
@@ -166,8 +170,16 @@ if [ -d "$SRC/.git" ]; then
     || stopp "Quelle nicht aktualisierbar (git fetch) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
   ok "Quelle aktualisiert: $SRC"
 else
-  timeout 300 git clone -q --depth 1 "$URL" "$SRC" \
-    || stopp "Quelle nicht geholt (git clone, 5 min) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
+  # Bis zu 3 Versuche mit 60 s Grenze und wachsender Pause, statt einem
+  # einzigen Versuch, der 5 min haengen kann.
+  geholt=0
+  for pause in 0 20 60; do
+    sleep "$pause"
+    rm -rf "$SRC"
+    if timeout 60 git clone -q --depth 1 "$URL" "$SRC"; then geholt=1; break; fi
+    warn "Klon nicht fertig geworden – neuer Versuch"
+  done
+  [ "$geholt" = 1 ] || stopp "Quelle nicht geholt (3 Versuche) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
   ok "Quelle geholt: $SRC"
 fi
 
