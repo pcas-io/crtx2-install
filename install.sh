@@ -12,7 +12,7 @@
 # Ablauf, jeder Schritt prueft sich und laesst sich wiederholen:
 #   1 Vorpruefung (aendert nichts)   4 Zugang zum Repo (Deploy-Key)
 #   2 Name des Nodes (= Hostname)    5 Bootstrap aus dem Repo
-#   3 Grundpakete                    6 Uebergabe: Claim-Adresse, Claude-Login
+#   3 Grundpakete                    6 Uebergabe: Claim-Adresse und Einmal-Token
 #
 # Unbeaufsichtigt (kein Terminal): CRTX2_REPO=<owner/name> CRTX2_NAME=<name>
 # Nur pruefen: ... | sudo bash -s -- --check
@@ -175,12 +175,6 @@ else
   if [ -n "$token" ] && [ -n "$TTY" ]; then printf '  Einmal-Token:        %s%s%s (24 h)\n' "$B" "$token" "$N" > "$TTY"
   else printf '  Einmal-Token: sudo journalctl -u console | grep "SETUP TOKEN" | tail -1\n'; fi
 fi
-printf '  Bis zum Übernehmen wartet der Agent – danach erscheint er als „%s claude“ in claude.ai/code.\n' "$NAME"
-if [ -n "$TTY" ] && sudo -u "$USR" -i bash -lc 'claude auth status 2>/dev/null' | grep -q '"loggedIn": *true'; then
-  ok "Claude ist schon angemeldet"
-elif [ -n "$TTY" ]; then
-  a=$(frage "Jetzt bei Claude anmelden? (j/n)" "j")
-  # shellcheck disable=SC2024,SC2094  # Umleitung als root ans eigene Terminal ist gewollt
-  if [ "$a" = j ]; then sudo -u "$USR" -i bash -lc 'claude auth login' < "$TTY" > "$TTY" 2>&1 || warn "Anmeldung nicht abgeschlossen – später: claude auth login"; fi
-fi
+printf '  Danach führt dich die Console durch die Anmeldung bei Claude – ohne SSH.\n'
+printf '  Dein Agent erscheint anschließend als „%s claude“ in claude.ai/code.\n' "$NAME"
 printf '\n%sFertig.%s Protokoll: %s\n' "$G" "$N" "$LOG"

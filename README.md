@@ -17,7 +17,7 @@ normaler Benutzer mit sudo, Internet. Dieser Benutzer wird der Benutzer des Agen
 4. Zugang zum Repo – bei einem privaten Repo erzeugt es einen Deploy-Key auf dem
    Node, zeigt ihn an und wartet, bis du ihn bei GitHub eingetragen hast
 5. Bootstrap aus dem Repo
-6. Übergabe: Adresse der Console, Einmal-Token, Claude-Login
+6. Übergabe: Adresse der Console und Einmal-Token – Claude meldest du danach im Browser an
 
 Nur prüfen: `curl … | sudo bash -s -- --check`
 Unbeaufsichtigt: `curl … | sudo CRTX2_REPO=<owner/name> CRTX2_NAME=<name> bash`
