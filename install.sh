@@ -91,9 +91,8 @@ case $uhr in
   unbekannt) warn "Uhr nicht prüfbar (kein timedatectl)" ;;
   *) warn "Uhr nach 2 min nicht synchron – Downloads können scheitern" ;;
 esac
-for ziel in github.com:443 github.com:22 registry.npmjs.org:443 deb.nodesource.com:443 discord.com:443; do
+for ziel in github.com:443 ssh.github.com:443 registry.npmjs.org:443 deb.nodesource.com:443 discord.com:443; do
   if timeout 6 bash -c "exec 3<>/dev/tcp/${ziel%:*}/${ziel#*:}" 2>/dev/null; then ok "erreichbar: $ziel"
-  elif [ "$ziel" = github.com:22 ]; then warn "github.com:22 gesperrt – ich nehme Port 443"
   elif [ "$ziel" = discord.com:443 ]; then warn "discord.com nicht erreichbar – Discord geht später nicht"
   else nein "nicht erreichbar: $ziel"; fehler=1; fi
 done
@@ -130,17 +129,20 @@ schritt "4 · Zugang zum Repo"
 REPO=${CRTX2_REPO:-}
 [ -n "$REPO" ] || REPO=$(frage "Welches Repo? (owner/name auf GitHub)" "")
 printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || stopp "Repo '$REPO': bitte als owner/name."
-if git ls-remote "https://github.com/$REPO.git" HEAD >/dev/null 2>&1; then
+if timeout 20 git ls-remote "https://github.com/$REPO.git" HEAD >/dev/null 2>&1; then
   URL="https://github.com/$REPO.git"; SSH_URL=""
   ok "öffentliches Repo – kein Schlüssel nötig"
 else
   install -d -m 700 /etc/crtx2
   [ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C "crtx2-$NAME" -f "$KEY"
   chmod 600 "$KEY"
-  SSH_URL="git@github.com:$REPO.git"
-  timeout 6 bash -c 'exec 3<>/dev/tcp/github.com/22' 2>/dev/null || SSH_URL="ssh://git@ssh.github.com:443/$REPO.git"
+  # Immer SSH ueber Port 443 (ssh.github.com, GitHubs offizieller Weg durch
+  # Firewalls). Lauf 5 (agentic-zero): Port 22 brach zeitweise mit "Connection
+  # timed out" ab, waehrend 443 sofort antwortete — die Vorpruefung hatte 22
+  # Sekunden vorher noch erreicht.
+  SSH_URL="ssh://git@ssh.github.com:443/$REPO.git"
   export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-  if ! git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1; then
+  if ! timeout 20 git ls-remote "$SSH_URL" HEAD >/dev/null 2>&1; then
     printf '\n  Das Repo ist privat. Trag diesen Schlüssel als %sDeploy Key%s ein (nur lesen, %skein%s Haken bei „Allow write access“):\n\n' "$B" "$N" "$B" "$N"
     printf '    https://github.com/%s/settings/keys/new\n\n    %s\n\n' "$REPO" "$(cat "$KEY.pub")"
     printf '  Ich prüfe von selbst – du musst nichts bestätigen. Enter prüft sofort.\n  '
