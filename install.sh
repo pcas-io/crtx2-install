@@ -207,8 +207,8 @@ else
   if [ -n "$token" ] && [ -n "$TTY" ]; then printf '  Einmal-Token:        %s%s%s (24 h)\n' "$B" "$token" "$N" > "$TTY"
   else printf '  Einmal-Token: sudo journalctl -u console | grep "SETUP TOKEN" | tail -1\n'; fi
 fi
-printf '  Danach führt dich die Console durch die Anmeldung bei Claude – ohne SSH.\n'
-printf '  Dein Agent erscheint anschließend als „%s claude“ in claude.ai/code.\n' "$NAME"
+printf '  Danach wählst du in der Console den Anbieter – Claude, Mistral oder beide –\n'
+printf '  und meldest den Agenten an, ohne SSH. Mit Claude erscheint er als „%s claude“ in claude.ai/code.\n' "$NAME"
 printf '\n%sFertig.%s Protokoll: %s\n' "$G" "$N" "$LOG"
 }
 
