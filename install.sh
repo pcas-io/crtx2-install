@@ -144,8 +144,15 @@ if command -v cloud-init >/dev/null && ! cloud-init status 2>/dev/null | grep -q
   printf '  … cloud-init richtet die VM noch ein, ich warte (höchstens 10 min)\n'
   timeout 600 cloud-init status --wait >/dev/null 2>&1 || warn "cloud-init nach 10 min nicht fertig – es geht weiter"
 fi
-belegt() { fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1 \
-  || pgrep -x unattended-upgr >/dev/null || pgrep -f apt.systemd.daily >/dev/null; }
+# Nur echte Laeufe zaehlen: `unattended-upgrade-shutdown --wait-for-signal` wartet auf
+# Ubuntu immer im Hintergrund und heisst gekuerzt ebenfalls „unattended-upgr“
+# (ifp-hq-harness, 2026-10-20: der Installer wartete auf ihn).
+belegt() {
+  pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade( |$)' >/dev/null && return 0
+  pgrep -x 'apt-get|apt|dpkg|aptitude' >/dev/null && return 0
+  pgrep -f '/usr/lib/apt/apt.systemd.daily' >/dev/null && return 0
+  command -v fuser >/dev/null && fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1
+}
 if belegt; then
   printf '  … die automatischen Systemupdates laufen gerade, ich warte (höchstens 15 min)\n'
   for _ in $(seq 180); do belegt || break; sleep 5; done
