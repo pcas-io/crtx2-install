@@ -44,7 +44,10 @@ TTY=""
 [ -r /dev/tty ] && { : < /dev/tty; } 2>/dev/null && TTY=/dev/tty
 frage() {  # frage <Text> <Vorgabe> -> Antwort (oder Vorgabe ohne Terminal)
   local a=""
-  if [ -n "$TTY" ]; then read -r -p "  $1 [$2]: " a < "$TTY" || true; fi
+  # Die Frage direkt aufs Terminal schreiben, nicht ueber stderr: stderr laeuft hier durch
+  # die Log-Umleitung (tee), und read -p blieb so auf Ubuntu 26.04 (sudo-rs) unsichtbar –
+  # der Installer wartete stumm (ifp-hq-harness, 2026-10-20).
+  if [ -n "$TTY" ]; then printf '  %s [%s]: ' "$1" "$2" > "$TTY"; read -r a < "$TTY" || true; fi
   printf '%s' "${a:-$2}"
 }
 
