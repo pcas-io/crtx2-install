@@ -19,6 +19,18 @@ normaler Benutzer mit sudo, Internet. Dieser Benutzer wird der Benutzer des Agen
 5. Bootstrap aus dem Repo
 6. Übergabe: Adresse der Console und Einmal-Token – Anbieter (Claude, Mistral oder beide) wählst du danach im Browser
 
+Kommt deine Eingabe nicht an (Ubuntu 26.04 und neuer, dort ist sudo-rs Standard:
+bei `curl … | sudo bash` erreicht die Tastatur den Installer nicht), lade das Skript
+erst herunter – dann funktionieren Eingaben und Enter:
+
+```
+curl -fsSLo /tmp/crtx2-install.sh https://raw.githubusercontent.com/pcas-io/crtx2-install/main/install.sh
+sudo bash /tmp/crtx2-install.sh
+```
+
+Ohne Eingabe nimmt jede Frage nach 60 s die Vorgabe; der Deploy-Key wird ohnehin von
+selbst geprüft. Optionen (z. B. `CRTX2_DOCKER=1`, `CRTX2_NAME=<name>`) vor `bash`.
+
 Nur prüfen: `curl … | sudo bash -s -- --check`
 Unbeaufsichtigt: `curl … | sudo CRTX2_NAME=<name> bash` (Repo ist `pcas-io/crtx2`, ein anderes: `CRTX2_REPO=<owner/name>`)
 
