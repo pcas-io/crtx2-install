@@ -58,6 +58,32 @@ if [ -z "$USR" ] || [ "$USR" = root ]; then
 fi
 UHOME=$(getent passwd "$USR" | cut -d: -f6)
 
+# Firmennetz: sudo (auf Ubuntu 26.04 sudo-rs) verwirft Proxy-Variablen. Was in
+# /etc/environment oder der apt-Konfiguration steht, gilt deshalb auch hier und
+# geht an alle Unterprozesse (Bootstrap: scripts/setup/lib/netz.sh macht dasselbe).
+for v in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+  [ -n "${!v:-}" ] && continue
+  w=$(sed -n "s/^${v}=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}$/\1/p" /etc/environment 2>/dev/null | tail -1)
+  [ -n "$w" ] && export "$v=$w"
+done
+if [ -z "${http_proxy:-}${HTTP_PROXY:-}" ] && command -v apt-config >/dev/null; then
+  w=$(apt-config dump 2>/dev/null | sed -n 's/^Acquire::http::Proxy "\(.*\)";$/\1/p' | head -1)
+  [ -n "$w" ] && [ "$w" != DIRECT ] && export http_proxy="$w" https_proxy="${https_proxy:-$w}"
+fi
+PROXY=${https_proxy:-${HTTPS_PROXY:-${http_proxy:-${HTTP_PROXY:-}}}}
+[ -f /etc/ssl/certs/ca-certificates.crt ] && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+# erreichbar <host:port>: ohne Proxy per TCP, mit Proxy per curl durch den Proxy.
+erreichbar() {
+  local h=${1%:*} p=${1#*:} s=https
+  if [ -n "$PROXY" ]; then
+    [ "$p" = 80 ] && s=http
+    # Jede HTTP-Antwort (auch 404) heisst: erreichbar. Fehler sind nur Netzfehler.
+    timeout 15 curl -s -o /dev/null --max-time 12 -I "$s://$h/" 2>/dev/null
+  else
+    timeout 6 bash -c "exec 3<>/dev/tcp/$h/$p" 2>/dev/null
+  fi
+}
+
 if [ "$CHECK_ONLY" = 0 ]; then
   ( umask 077; : >> "$LOG" ); chmod 600 "$LOG"
   exec > >(tee -a "$LOG") 2>&1
@@ -85,12 +111,16 @@ ram=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 [ "$(id -u "$USR")" -ge 1000 ] && ok "Benutzer des Agenten: $USR ($UHOME)" || { nein "$USR ist ein Systembenutzer"; fehler=1; }
 uhr=no
 command -v timedatectl >/dev/null || uhr=unbekannt
-[ "$uhr" = unbekannt ] || for _ in $(seq 24); do
+[ "$uhr" = unbekannt ] || for i in $(seq 24); do
   [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ] && { uhr=yes; break; }
+  # VMs im Firmennetz: oeffentliches NTP gesperrt, die Uhr stellen die VM-Werkzeuge.
+  # Ist sie plausibel (Jahr >= 2026), nicht zwei Minuten warten.
+  [ "$i" -ge 4 ] && [ "$(date +%Y)" -ge 2026 ] && { uhr=plausibel; break; }
   sleep 5
 done
 case $uhr in
   yes) ok "Uhr synchron" ;;
+  plausibel) warn "Uhr nicht per NTP synchron, aber plausibel ($(date -u +%FT%TZ)) – es geht weiter" ;;
   unbekannt) warn "Uhr nicht prüfbar (kein timedatectl)" ;;
   *) warn "Uhr nach 2 min nicht synchron – Downloads können scheitern" ;;
 esac
@@ -100,11 +130,17 @@ quellen=$(grep -rhoE '^(deb|URIs:)[^#]*https?://[^ /]+' /etc/apt/sources.list /e
   | grep -oE 'https?://[^ /]+' | sort -u | head -6)
 for q in $quellen; do
   host=${q#*://}; port=80; [ "${q%%://*}" = https ] && port=443
-  if timeout 6 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then ok "Paketquelle erreichbar: $host:$port"
+  if erreichbar "$host:$port"; then ok "Paketquelle erreichbar: $host:$port"
   else nein "Paketquelle nicht erreichbar: $host:$port – Firewall/Proxy? (apt braucht sie)"; fehler=1; fi
 done
-for ziel in github.com:443 ssh.github.com:443 registry.npmjs.org:443 deb.nodesource.com:443 download.docker.com:443 discord.com:443; do
-  if timeout 6 bash -c "exec 3<>/dev/tcp/${ziel%:*}/${ziel#*:}" 2>/dev/null; then ok "erreichbar: $ziel"
+[ -n "$PROXY" ] && ok "Proxy aus der Systemkonfiguration: $(printf '%s' "$PROXY" | sed 's#//[^@]*@#//***@#')"
+# Alles, was Installer und Bootstrap spaeter laden: lieber hier ein klares ✗ als
+# ein Abbruch nach zehn Minuten (pip: pypi, Releases: GitHub-Downloads, Docker).
+for ziel in github.com:443 ssh.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443 \
+            registry.npmjs.org:443 deb.nodesource.com:443 pypi.org:443 files.pythonhosted.org:443 \
+            get.docker.com:443 download.docker.com:443 discord.com:443; do
+  if erreichbar "$ziel"; then ok "erreichbar: $ziel"
+  elif [ "$ziel" = ssh.github.com:443 ] && [ -n "$PROXY" ]; then warn "ssh.github.com: durch den Proxy nicht prüfbar – ein privates Repo braucht ihn"
   elif [ "$ziel" = discord.com:443 ]; then warn "discord.com nicht erreichbar – Discord geht später nicht"
   else nein "nicht erreichbar: $ziel"; fehler=1; fi
 done
@@ -150,7 +186,7 @@ fi
 belegt() {
   pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade( |$)' >/dev/null && return 0
   pgrep -x 'apt-get|apt|dpkg|aptitude' >/dev/null && return 0
-  pgrep -f '/usr/lib/apt/apt.systemd.daily' >/dev/null && return 0
+  pgrep -f '^/bin/sh /usr/lib/apt/apt.systemd.daily' >/dev/null && return 0
   command -v fuser >/dev/null && fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1
 }
 if belegt; then
@@ -235,7 +271,8 @@ fi
 
 # ── 5 Bootstrap ─────────────────────────────────────────────────────────────
 schritt "5 · Einrichten (Bootstrap)"
-REPO_URL="https://github.com/$REPO" REPO_SSH="$URL" AGENT_USER="$USR" \
+# Die Uhr ist in Schritt 1 schon geprueft: der Bootstrap wartet nicht noch einmal.
+CRTX2_NTP_WAIT=0 REPO_URL="https://github.com/$REPO" REPO_SSH="$URL" AGENT_USER="$USR" \
   bash "$SRC/scripts/bootstrap.sh" || stopp "der Bootstrap ist abgebrochen – Grund steht oben und in /var/log/crtx2-bootstrap.log. Derselbe Befehl setzt wieder an."
 
 # ── 6 Uebergabe ─────────────────────────────────────────────────────────────
