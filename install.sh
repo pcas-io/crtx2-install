@@ -94,7 +94,16 @@ case $uhr in
   unbekannt) warn "Uhr nicht prüfbar (kein timedatectl)" ;;
   *) warn "Uhr nach 2 min nicht synchron – Downloads können scheitern" ;;
 esac
-for ziel in github.com:443 ssh.github.com:443 registry.npmjs.org:443 deb.nodesource.com:443 discord.com:443; do
+# Die Paketquellen des Systems (meist http, Port 80 – in Firmennetzen oft gesperrt).
+# Ohne sie haengt apt-get in Schritt 3 minutenlang ohne Ausgabe (ifp-hq-harness, 2026-10-20).
+quellen=$(grep -rhoE '^(deb|URIs:)[^#]*https?://[^ /]+' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null \
+  | grep -oE 'https?://[^ /]+' | sort -u | head -6)
+for q in $quellen; do
+  host=${q#*://}; port=80; [ "${q%%://*}" = https ] && port=443
+  if timeout 6 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then ok "Paketquelle erreichbar: $host:$port"
+  else nein "Paketquelle nicht erreichbar: $host:$port – Firewall/Proxy? (apt braucht sie)"; fehler=1; fi
+done
+for ziel in github.com:443 ssh.github.com:443 registry.npmjs.org:443 deb.nodesource.com:443 download.docker.com:443 discord.com:443; do
   if timeout 6 bash -c "exec 3<>/dev/tcp/${ziel%:*}/${ziel#*:}" 2>/dev/null; then ok "erreichbar: $ziel"
   elif [ "$ziel" = discord.com:443 ]; then warn "discord.com nicht erreichbar – Discord geht später nicht"
   else nein "nicht erreichbar: $ziel"; fehler=1; fi
@@ -120,9 +129,36 @@ fi
 
 # ── 3 Grundpakete ───────────────────────────────────────────────────────────
 schritt "3 · Grundpakete"
-export DEBIAN_FRONTEND=noninteractive GIT_TERMINAL_PROMPT=0
-apt-get update -qq
-apt-get install -y -qq git openssh-client avahi-daemon ca-certificates curl >/dev/null
+export DEBIAN_FRONTEND=noninteractive GIT_TERMINAL_PROMPT=0 NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+# Fuer jeden apt-Aufruf auf dem Node, auch spaeter im Bootstrap: auf eine belegte
+# Paketverwaltung warten statt abbrechen, Downloads mit Frist und Wiederholung.
+cat > /etc/apt/apt.conf.d/90crtx2 <<'APT'
+DPkg::Lock::Timeout "900";
+Acquire::Retries "3";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+APT
+# Erster Start einer Cloud-VM: cloud-init und die automatischen Updates halten die
+# Paketverwaltung oft minutenlang. Sichtbar warten statt stumm haengen.
+if command -v cloud-init >/dev/null && ! cloud-init status 2>/dev/null | grep -qE 'done|disabled|error'; then
+  printf '  … cloud-init richtet die VM noch ein, ich warte (höchstens 10 min)\n'
+  timeout 600 cloud-init status --wait >/dev/null 2>&1 || warn "cloud-init nach 10 min nicht fertig – es geht weiter"
+fi
+belegt() { fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1 \
+  || pgrep -x unattended-upgr >/dev/null || pgrep -f apt.systemd.daily >/dev/null; }
+if belegt; then
+  printf '  … die automatischen Systemupdates laufen gerade, ich warte (höchstens 15 min)\n'
+  for _ in $(seq 180); do belegt || break; sleep 5; done
+  belegt && warn "Paketverwaltung nach 15 min noch belegt – apt wartet selbst weiter"
+fi
+apt_lauf() {  # apt_lauf <Was> <apt-get-Argumente…>: mit Frist, Fehlertext sichtbar
+  local was=$1; shift
+  printf '  … %s\n' "$was"
+  timeout 1800 apt-get -qq "$@" >/tmp/crtx2-apt.log 2>&1 \
+    || { tail -n 15 /tmp/crtx2-apt.log; stopp "$was ist gescheitert – Ausgabe oben, ganz in /tmp/crtx2-apt.log."; }
+}
+apt_lauf "Paketlisten laden" update
+apt_lauf "git, ssh, avahi installieren" install -y git openssh-client avahi-daemon ca-certificates curl psmisc
 systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
 systemctl restart avahi-daemon >/dev/null 2>&1 || true
 ok "git, ssh, avahi ($NAME.local) installiert"
