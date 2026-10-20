@@ -47,7 +47,12 @@ frage() {  # frage <Text> <Vorgabe> -> Antwort (oder Vorgabe ohne Terminal)
   # Die Frage direkt aufs Terminal schreiben, nicht ueber stderr: stderr laeuft hier durch
   # die Log-Umleitung (tee), und read -p blieb so auf Ubuntu 26.04 (sudo-rs) unsichtbar –
   # der Installer wartete stumm (ifp-hq-harness, 2026-10-20).
-  if [ -n "$TTY" ]; then printf '  %s [%s]: ' "$1" "$2" > "$TTY"; read -r a < "$TTY" || true; fi
+  # Mit Frist: bei `curl … | sudo bash` reicht sudo-rs (Ubuntu 26.04) die Tastatur nicht
+  # an /dev/tty durch – ohne Frist wartete der Installer ewig (ifp-hq-harness, 2026-10-20).
+  if [ -n "$TTY" ]; then
+    printf '  %s [%s] (60 s, sonst Vorgabe): ' "$1" "$2" > "$TTY"
+    read -r -t 60 a < "$TTY" || { a=""; printf '\n' > "$TTY"; }
+  fi
   printf '%s' "${a:-$2}"
 }
 
