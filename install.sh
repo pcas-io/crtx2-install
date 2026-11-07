@@ -15,6 +15,7 @@
 #   3 Grundpakete                    6 Uebergabe: Claim-Adresse und Einmal-Token
 #
 # Unbeaufsichtigt (kein Terminal): CRTX2_NAME=<name>, anderes Repo: CRTX2_REPO=<owner/name>
+# Stand: neuestes Release-Tag v*; ein anderer: CRTX2_STAND=<tag|main>
 # Nur pruefen: ... | sudo bash -s -- --check
 set -euo pipefail
 
@@ -251,13 +252,24 @@ else
   URL="$SSH_URL"
   ok "Zugang zum Repo per Deploy-Key"
 fi
+# Stand: das neueste Release-Tag v* (crtx2 Beta-Plan B6, 2026-11-07), nicht main.
+# Vorabversionen (v0.9.0-beta.1) sortieren vor dem Release (v0.9.0).
+# Ein bestimmter Stand oder main fuer Entwickler: CRTX2_STAND=<tag|main> vor bash.
+STAND=${CRTX2_STAND:-}
+if [ -z "$STAND" ]; then
+  STAND=$(timeout 30 git -c versionsort.suffix=- ls-remote --tags --refs --sort=-v:refname "$URL" 'v*' 2>/dev/null \
+          | head -1 | sed 's|.*refs/tags/||') || true
+  [ -n "$STAND" ] || { STAND=main; warn "kein Release-Tag gefunden – installiere main"; }
+fi
+case "$STAND" in *[!A-Za-z0-9._/-]*|-*) stopp "CRTX2_STAND ungültig: $STAND" ;; esac
+ok "Stand: $STAND"
 # Ein halber Klon (abgebrochener Lauf) hat kein HEAD: dann neu holen statt flicken.
 if [ -d "$SRC/.git" ] && ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null 2>&1; then
   rm -rf "$SRC"
   warn "halber Klon vom letzten Lauf entfernt"
 fi
 if [ -d "$SRC/.git" ]; then
-  timeout 300 git -C "$SRC" fetch -q origin && git -C "$SRC" checkout -q --detach origin/HEAD \
+  timeout 300 git -C "$SRC" fetch -q --depth 1 origin "$STAND" && git -C "$SRC" checkout -q --detach FETCH_HEAD \
     || stopp "Quelle nicht aktualisierbar (git fetch) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
   ok "Quelle aktualisiert: $SRC"
 else
@@ -267,7 +279,7 @@ else
   for pause in 0 20 60; do
     sleep "$pause"
     rm -rf "$SRC"
-    if timeout 60 git clone -q --depth 1 "$URL" "$SRC"; then geholt=1; break; fi
+    if timeout 60 git clone -q --depth 1 --branch "$STAND" "$URL" "$SRC"; then geholt=1; break; fi
     warn "Klon nicht fertig geworden – neuer Versuch"
   done
   [ "$geholt" = 1 ] || stopp "Quelle nicht geholt (3 Versuche) – Netz zu GitHub prüfen, dann denselben Befehl noch einmal."
@@ -277,7 +289,12 @@ fi
 # ── 5 Bootstrap ─────────────────────────────────────────────────────────────
 schritt "5 · Einrichten (Bootstrap)"
 # Die Uhr ist in Schritt 1 schon geprueft: der Bootstrap wartet nicht noch einmal.
+# Bei einem Tag: Arbeitsklon (REPO_REF), Console und Adapter (CRTX2_ZIEL) auf genau
+# diesen Commit, sonst zoege n10 die Console auf main.
+ZIEL=""
+[ "$STAND" = main ] || ZIEL=$(git -C "$SRC" rev-parse HEAD)
 CRTX2_NTP_WAIT=0 REPO_URL="https://github.com/$REPO" REPO_SSH="$URL" AGENT_USER="$USR" \
+  REPO_REF="$STAND" CRTX2_ZIEL="$ZIEL" \
   bash "$SRC/scripts/bootstrap.sh" || stopp "der Bootstrap ist abgebrochen – Grund steht oben und in /var/log/crtx2-bootstrap.log. Derselbe Befehl setzt wieder an."
 
 # ── 6 Uebergabe ─────────────────────────────────────────────────────────────

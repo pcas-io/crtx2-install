@@ -31,6 +31,9 @@ sudo bash /tmp/crtx2-install.sh
 Ohne Eingabe nimmt jede Frage nach 60 s die Vorgabe; der Deploy-Key wird ohnehin von
 selbst geprüft. Optionen (z. B. `CRTX2_DOCKER=1`, `CRTX2_NAME=<name>`) vor `bash`.
 
+Installiert wird das neueste Release-Tag (`v…`, z. B. `v0.9.0-beta.1`), nicht `main`.
+Einen anderen Stand wählst du mit `CRTX2_STAND=<tag>`, für Entwickler `CRTX2_STAND=main`.
+
 Nur prüfen: `curl … | sudo bash -s -- --check`
 Unbeaufsichtigt: `curl … | sudo CRTX2_NAME=<name> bash` (Repo ist `pcas-io/crtx2`, ein anderes: `CRTX2_REPO=<owner/name>`)
 
