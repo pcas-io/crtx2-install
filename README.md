@@ -34,6 +34,20 @@ selbst geprüft. Optionen (z. B. `CRTX2_DOCKER=1`, `CRTX2_NAME=<name>`) vor `bas
 Installiert wird das neueste Release-Tag (`v…`, z. B. `v0.9.0-beta.1`), nicht `main`.
 Einen anderen Stand wählst du mit `CRTX2_STAND=<tag>`, für Entwickler `CRTX2_STAND=main`.
 
+**Zugang von unterwegs (VPN):** Standard ist NetBird (`CRTX2_ZUGANG=netbird`), ohne VPN
+`CRTX2_ZUGANG=keiner` (das alte `CRTX2_NETBIRD=0` gilt weiter). Den Setup-Key fragt der Installer
+verdeckt ab; leer heißt: später in der Console unter Zugang. Für Rechenzentrum und Cloud,
+unbeaufsichtigt, aus einer Datei – so ist der Node vom ersten Start an nur über das VPN
+erreichbar:
+
+```
+sudo install -m 600 /dev/stdin /root/netbird.key   # Key einfügen, dann Strg-D
+sudo CRTX2_ZUGANG_KEY_FILE=/root/netbird.key CRTX2_NAME=<name> bash /tmp/crtx2-install.sh
+```
+
+Der Key steht nie in Ausgabe, Protokoll oder Umgebung; nach der Anmeldung wird die
+abgelegte Kopie vernichtet. Tailscale folgt über denselben Weg.
+
 Nur prüfen: `curl … | sudo bash -s -- --check`
 Unbeaufsichtigt: `curl … | sudo CRTX2_NAME=<name> bash` (Repo ist `pcas-io/crtx2`, ein anderes: `CRTX2_REPO=<owner/name>`)
 

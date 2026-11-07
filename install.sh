@@ -10,12 +10,15 @@
 # das Repo und den Namen fragt es ab (oder nimmt sie aus der Umgebung).
 #
 # Ablauf, jeder Schritt prueft sich und laesst sich wiederholen:
-#   1 Vorpruefung (aendert nichts)   4 Zugang zum Repo (Deploy-Key)
-#   2 Name des Nodes (= Hostname)    5 Bootstrap aus dem Repo
-#   3 Grundpakete                    6 Uebergabe: Claim-Adresse und Einmal-Token
+#   1 Vorpruefung (aendert nichts)   5 Zugang zum Repo (Deploy-Key)
+#   2 Name des Nodes (= Hostname)    6 Bootstrap aus dem Repo
+#   3 Zugang von unterwegs (VPN)     7 Uebergabe: Claim-Adresse und Einmal-Token
+#   4 Grundpakete
 #
 # Unbeaufsichtigt (kein Terminal): CRTX2_NAME=<name>, anderes Repo: CRTX2_REPO=<owner/name>
 # Stand: neuestes Release-Tag v*; ein anderer: CRTX2_STAND=<tag|main>
+# Zugang von unterwegs: CRTX2_ZUGANG=netbird (Vorgabe) | keiner; Setup-Key verdeckt am
+#   Terminal oder unbeaufsichtigt aus einer Datei: CRTX2_ZUGANG_KEY_FILE=<pfad> (nie als Wert)
 # Nur pruefen: ... | sudo bash -s -- --check
 set -euo pipefail
 
@@ -169,8 +172,57 @@ else
   ok "Name: $NAME"
 fi
 
-# ── 3 Grundpakete ───────────────────────────────────────────────────────────
-schritt "3 · Grundpakete"
+# ── 3 Zugang von unterwegs ──────────────────────────────────────────────────
+# Genau ein VPN-Anbieter (crtx2 beta.5, Nico 2026-11-07): heute NetBird, spaeter Tailscale
+# ueber denselben Weg. Mit Setup-Key ist ein Node im Rechenzentrum oder in der Cloud vom
+# ersten Start an nur ueber das VPN erreichbar (die Console lauscht nie auf oeffentlichen
+# Adressen). Der Key geht nie durch Ausgabe, Protokoll oder Umgebung: verdeckt eingegeben
+# oder aus einer Datei gelesen, als root-eigene Datei (0600) abgelegt; der Bootstrap meldet
+# den Node damit an und vernichtet sie (netbird_anmelden.py).
+schritt "3 · Zugang von unterwegs"
+ZUGANG=${CRTX2_ZUGANG:-}
+if [ -z "$ZUGANG" ]; then
+  if [ "${CRTX2_NETBIRD:-1}" = 0 ]; then ZUGANG=keiner; else ZUGANG=netbird; fi
+fi
+case "$ZUGANG" in
+  netbird|keiner) ;;
+  *) stopp "CRTX2_ZUGANG=$ZUGANG: erlaubt sind netbird oder keiner (Tailscale folgt)." ;;
+esac
+export CRTX2_ZUGANG="$ZUGANG"
+[ "$ZUGANG" = keiner ] && export CRTX2_NETBIRD=0
+if [ "$ZUGANG" = keiner ]; then
+  ok "kein VPN – die Console ist nur im lokalen Netz erreichbar"
+else
+  zkey=""
+  zdatei="/var/lib/crtx2/$ZUGANG/setup-key"
+  if [ -n "${CRTX2_ZUGANG_KEY_FILE:-}" ]; then
+    [ -f "$CRTX2_ZUGANG_KEY_FILE" ] && [ -r "$CRTX2_ZUGANG_KEY_FILE" ] \
+      || stopp "CRTX2_ZUGANG_KEY_FILE=$CRTX2_ZUGANG_KEY_FILE ist keine lesbare Datei."
+    zkey=$(tr -d ' \t\r\n' < "$CRTX2_ZUGANG_KEY_FILE")
+  elif [ -f "$zdatei" ]; then
+    ok "Setup-Key liegt schon bereit (letzter Lauf) – wird beim Einrichten verwendet"
+  elif [ -n "$TTY" ]; then
+    printf '  Setup-Key für %s (verdeckt; leer = später in der Console) (120 s): ' "$ZUGANG" > "$TTY"
+    read -r -s -t 120 zkey < "$TTY" || zkey=""
+    printf '\n' > "$TTY"
+    zkey=$(printf '%s' "$zkey" | tr -d ' \t\r\n')
+  fi
+  if [ -n "$zkey" ]; then
+    printf '%s' "$zkey" | grep -Eq '^[A-Za-z0-9-]{20,80}$' \
+      || stopp "Der Setup-Key hat nicht die erwartete Form (20–80 Zeichen, Buchstaben, Ziffern, -)."
+    install -d -m 755 /var/lib/crtx2
+    install -d -m 755 "/var/lib/crtx2/$ZUGANG"
+    ( umask 077; printf '%s' "$zkey" > "$zdatei.neu" ) && chmod 600 "$zdatei.neu" && mv -f "$zdatei.neu" "$zdatei" \
+      || stopp "Setup-Key nicht ablegbar ($zdatei)."
+    zkey=""
+    ok "Setup-Key abgelegt – der Node meldet sich beim Einrichten bei $ZUGANG an"
+  elif [ ! -f "$zdatei" ]; then
+    ok "$ZUGANG wird installiert; anmelden später in der Console unter Zugang"
+  fi
+fi
+
+# ── 4 Grundpakete ───────────────────────────────────────────────────────────
+schritt "4 · Grundpakete"
 export DEBIAN_FRONTEND=noninteractive GIT_TERMINAL_PROMPT=0 NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
 # Fuer jeden apt-Aufruf auf dem Node, auch spaeter im Bootstrap: auf eine belegte
 # Paketverwaltung warten statt abbrechen, Downloads mit Frist und Wiederholung.
@@ -212,8 +264,8 @@ systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
 systemctl restart avahi-daemon >/dev/null 2>&1 || true
 ok "git, ssh, avahi ($NAME.local) installiert"
 
-# ── 4 Zugang zum Repo ───────────────────────────────────────────────────────
-schritt "4 · Zugang zum Repo"
+# ── 5 Zugang zum Repo ───────────────────────────────────────────────────────
+schritt "5 · Zugang zum Repo"
 # Keine Frage mehr (Lauf 6, Befund 40): das Repo ist fast immer dasselbe.
 # Ein anderes setzt CRTX2_REPO=<owner/name> vor bash.
 REPO=${CRTX2_REPO:-pcas-io/crtx2}
@@ -286,8 +338,8 @@ else
   ok "Quelle geholt: $SRC"
 fi
 
-# ── 5 Bootstrap ─────────────────────────────────────────────────────────────
-schritt "5 · Einrichten (Bootstrap)"
+# ── 6 Bootstrap ─────────────────────────────────────────────────────────────
+schritt "6 · Einrichten (Bootstrap)"
 # Die Uhr ist in Schritt 1 schon geprueft: der Bootstrap wartet nicht noch einmal.
 # Bei einem Tag: Arbeitsklon (REPO_REF), Console und Adapter (CRTX2_ZIEL) auf genau
 # diesen Commit, sonst zoege n10 die Console auf main.
@@ -297,8 +349,8 @@ CRTX2_NTP_WAIT=0 REPO_URL="https://github.com/$REPO" REPO_SSH="$URL" AGENT_USER=
   REPO_REF="$STAND" CRTX2_ZIEL="$ZIEL" \
   bash "$SRC/scripts/bootstrap.sh" || stopp "der Bootstrap ist abgebrochen – Grund steht oben und in /var/log/crtx2-bootstrap.log. Derselbe Befehl setzt wieder an."
 
-# ── 6 Uebergabe ─────────────────────────────────────────────────────────────
-schritt "6 · Übergabe"
+# ── 7 Uebergabe ─────────────────────────────────────────────────────────────
+schritt "7 · Übergabe"
 ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ -f /home/console/console-state/admin.json ]; then
   ok "Console ist schon übernommen: https://$NAME.local:8443"
