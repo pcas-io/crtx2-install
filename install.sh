@@ -135,8 +135,10 @@ case $uhr in
 esac
 # Die Paketquellen des Systems (meist http, Port 80 – in Firmennetzen oft gesperrt).
 # Ohne sie haengt apt-get in Schritt 3 minutenlang ohne Ausgabe (ifp-hq-harness, 2026-10-20).
+# `|| true`: fehlt /etc/apt/sources.list (deb822 nur unter sources.list.d, z. B. Debian 12
+# als Container), endet grep mit 2 und pipefail beendete die Vorpruefung stumm (CI seit #12).
 quellen=$(grep -rhoE '^(deb|URIs:)[^#]*https?://[^ /]+' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null \
-  | grep -oE 'https?://[^ /]+' | sort -u | head -6)
+  | grep -oE 'https?://[^ /]+' | sort -u | head -6 || true)
 for q in $quellen; do
   host=${q#*://}; port=80; [ "${q%%://*}" = https ] && port=443
   if erreichbar "$host:$port"; then ok "Paketquelle erreichbar: $host:$port"
